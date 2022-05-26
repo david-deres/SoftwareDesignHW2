@@ -3,6 +3,7 @@ package il.ac.technion.cs.softwaredesign
 //import il.ac.technion.cs.softwaredesign.loan.GeneralBookLoanApproval
 //import il.ac.technion.cs.softwaredesign.loan.FacultyStaffBookLoanApproval
 //import il.ac.technion.cs.softwaredesign.loan.RegularBookLoanApproval
+import com.google.gson.Gson
 import java.util.concurrent.CompletableFuture
 
 /**
@@ -29,7 +30,20 @@ enum class LoanStatus {
 data class LoanRequestInformation(val loanName: String,
                                   val requestedBooks: List<String>,
                                   val ownerUserId: String,
-                                  val loanStatus: LoanStatus)
+                                  var loanStatus: LoanStatus)
+{
+    companion object {
+        private var gson = Gson()
+        fun fromJSON(loan : String) : LoanRequestInformation {
+            return gson.fromJson(loan, LoanRequestInformation::class.java)
+        }
+    }
+
+    fun toByteArray() : ByteArray {
+        val gson = Gson()
+        return gson.toJson(this).toByteArray()
+    }
+}
 
 
 /**

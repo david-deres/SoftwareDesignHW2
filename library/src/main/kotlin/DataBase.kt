@@ -7,6 +7,7 @@ open class DataBase (dbFactory: SecureStorageFactory, name:String) {
     // Size is in Bytes
     private val maxDBEntrySize = 100
 
+    // TODO: maybe use thenCombine to concat results
     fun read (key: String): ByteArray?{
         var returnedValue = byteArrayOf()
         var counter = 1
@@ -23,6 +24,7 @@ open class DataBase (dbFactory: SecureStorageFactory, name:String) {
         } else returnedValue
     }
 
+    // TODO: maybe use thenCompose for sequential writes to DB
     fun write (key: String, value: ByteArray) {
         val bytesToWrite = value.size
         var counter = 0
