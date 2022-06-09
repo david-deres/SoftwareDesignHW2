@@ -14,7 +14,9 @@ import io.mockk.mockk
 class TestSifriTaubModule : KotlinModule() {
 
 
-    private val loanServiceMock = mockk<LoanService>(relaxed=true)
+//    private val loanServiceMock = mockk<LoanService>()
+
+
 
     override fun configure() {
 //        val injector = Guice.createInjector(TestSecureStorageModule())
@@ -24,7 +26,7 @@ class TestSifriTaubModule : KotlinModule() {
         bind<TokenFactory>().to<ProductionTokenFactory>().`in`<Singleton>()
         install(TestSecureStorageModule())
 //        install(TestSecureStorageModule())
-        bind<LoanService>().toInstance(loanServiceMock)
+        bind<LoanService>().to<TestLoanService>()
         bind<IDsFactory>().to<ProductionIDsFactory>().`in`<Singleton>()
 
     }

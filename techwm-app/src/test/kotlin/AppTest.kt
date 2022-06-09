@@ -5,6 +5,7 @@ import dev.misfitlabs.kotlinguice4.getInstance
 import il.ac.technion.cs.softwaredesign.*
 
 import org.junit.jupiter.api.Assertions
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertDoesNotThrow
@@ -32,7 +33,7 @@ class AppTest {
             sifriTaub.authenticate(username, password).thenCompose { token ->
                 (1..amount).fold(CompletableFuture.completedFuture(Unit)) {prev, id ->
                     prev.thenCompose { sifriTaub.addBookToCatalog(token, id.toString(), "random${id.toString()}", 1) }
-                }.thenCompose { CompletableFuture.completedFuture(token) }
+                }.thenApply { token }
             }
         }
     }
@@ -381,35 +382,101 @@ class AppTest {
 
     @Test
     fun `submitLoanRequest updates the loan`(){
-        addBooksToCatalog(5).thenCompose {
-                token ->  sifriTaub.submitLoanRequest(token, "first", listOf("1", "2"))
+        val token = addBooksToCatalog(4).join()
+         sifriTaub.submitLoanRequest(token, "first", listOf("1", "2"))
                   .thenCompose { loanId -> sifriTaub.loanRequestInformation(token, loanId)
-                      .thenApply { loanInfo -> Assertions.assertEquals(LoanStatus.QUEUED, loanInfo.loanStatus) }}
-        }.join()
+                      .thenApply { loanInfo -> Assertions.assertEquals(LoanStatus.QUEUED, loanInfo.loanStatus) }}.join()
+    }
+
+    @Test
+    fun `loanRequestInformation throws an exception on invalid loan id`(){
+        val (username, password) = registerFirstUser().join()
+
+        val throwable = assertThrows<CompletionException> {
+            sifriTaub.authenticate(username, password).thenCompose {
+                    token -> sifriTaub.loanRequestInformation(token, "1")
+            }.join()
+        }
+        assertThat(throwable.cause!!, isA<IllegalArgumentException>())
     }
 
 
     @Test
     fun `cancelLoanRequest cancels the loan`(){
-        addBooksToCatalog(5).thenCompose {
-                token ->  sifriTaub.submitLoanRequest(token, "first", listOf("1", "2"))
-                            .thenCompose { sifriTaub.submitLoanRequest(token, "first", listOf("3", "4")) }
-            .thenCompose { loanId -> sifriTaub.cancelLoanRequest(token, loanId)
-            .thenCompose { sifriTaub.loanRequestInformation(token, loanId) }
-                .thenApply { loanInfo -> Assertions.assertEquals(LoanStatus.CANCELED, loanInfo.loanStatus) }}
-        }.join()
+        sifriTaub.register("username", "password", true, 25).thenCompose {
+            sifriTaub.authenticate("username", "password").thenCompose { token ->
+                (1..4).fold(CompletableFuture.completedFuture(Unit)) { prev, id ->
+                    prev.thenCompose { sifriTaub.addBookToCatalog(token, id.toString(), "random${id.toString()}", 1) }
+                }.thenCompose { sifriTaub.submitLoanRequest(token, "first", listOf("1", "2"))
+                    .thenCompose { sifriTaub.submitLoanRequest(token, "first", listOf("3", "4")) }
+                    .thenCompose { loanId -> sifriTaub.cancelLoanRequest(token, loanId)
+                        .thenCompose { sifriTaub.loanRequestInformation(token, loanId) }
+                        .thenApply { loanInfo -> Assertions.assertEquals(LoanStatus.CANCELED, loanInfo.loanStatus) }} }
+            }}.join()
     }
 
-//    @Test
-//    fun `cancelLoanRequest cancels the loan and releases the queue`(){
-//        addBooksToCatalog(5).thenCompose {
-//                token ->  sifriTaub.submitLoanRequest(token, "first", listOf("1", "2"))
-//            .thenCompose { sifriTaub.submitLoanRequest(token, "first", listOf("3", "4")) }
-//            .thenCompose { loanId -> sifriTaub.cancelLoanRequest(token, loanId)
-//                .thenCompose { sifriTaub.loanRequestInformation(token, loanId) }
-//                .thenApply { loanInfo -> Assertions.assertEquals(LoanStatus.CANCELED, loanInfo.loanStatus) }}
-//        }.join()
-//    }
+    @Test
+    fun `cancelLoanRequest cancels the loan and releases the queue`(){
+        sifriTaub.register("username", "password", true, 25).thenCompose {
+            sifriTaub.authenticate("username", "password").thenCompose { token ->
+                (1..7).fold(CompletableFuture.completedFuture(Unit)) {prev, id ->
+                    prev.thenCompose { sifriTaub.addBookToCatalog(token, id.toString(), "random${id.toString()}", 1) }
+                }.thenApply { token }
+            }
+        }.thenCompose {
+                token ->  sifriTaub.submitLoanRequest(token, "first", listOf("1", "2"))
+            .thenCompose {loanId1 -> sifriTaub.submitLoanRequest(token, "first", listOf("3", "4"))
+            .thenCompose { loanId2 -> sifriTaub.cancelLoanRequest(token, loanId1)
+                .thenCompose { sifriTaub.waitForBooks(token, loanId2)  }
+                .thenCompose { sifriTaub.loanRequestInformation(token, loanId2) }
+                .thenApply { loanInfo -> Assertions.assertEquals(LoanStatus.OBTAINED, loanInfo.loanStatus) }}
+        }}.join()
+    }
+
+    @Test
+    fun `cancelLoanRequest in the middle of the queue gets cleared`(){
+        sifriTaub.register("username", "password", true, 25).thenCompose {
+            sifriTaub.authenticate("username", "password").thenCompose { token ->
+                (1..7).fold(CompletableFuture.completedFuture(Unit)) {prev, id ->
+                    prev.thenCompose { sifriTaub.addBookToCatalog(token, id.toString(), "random${id.toString()}", 1) }
+                }.thenApply { token }
+            }
+        }.thenCompose {
+                token ->  sifriTaub.submitLoanRequest(token, "first", listOf("1", "2"))
+            .thenCompose {loanId1 -> sifriTaub.submitLoanRequest(token, "first", listOf("3", "4"))
+                .thenCompose { loanId2 ->
+                    sifriTaub.submitLoanRequest(token, "first", listOf("5", "6"))
+                        .thenCompose { loanId3 ->
+                            sifriTaub.cancelLoanRequest(token, loanId2)
+                                .thenCompose {
+                                    sifriTaub.waitForBooks(token, loanId1)
+                                        .thenCompose { sifriTaub.waitForBooks(token, loanId3) }
+                                }
+                                .thenCompose { sifriTaub.loanRequestInformation(token, loanId3) }
+                                .thenApply { loanInfo ->
+                                    Assertions.assertEquals(
+                                        LoanStatus.OBTAINED,
+                                        loanInfo.loanStatus
+                                    )
+                                }
+                        }
+                }}}.join()
+    }
+
+    @Test
+    fun `returnBooks updates the amount correctly`(){
+        val username = "user-a"
+        val password = "123456"
+
+        sifriTaub.register(username, password, true, 25).thenCompose {
+            sifriTaub.authenticate(username, password).thenCompose { token ->
+                sifriTaub.addBookToCatalog(token, "1", "harry-potter", 1)
+                    .thenCompose { sifriTaub.submitLoanRequest(token, "first", listOf("1") ) }
+                    .thenCompose { loanId -> sifriTaub.waitForBooks(token, loanId) }
+                    .thenCompose { obtainedLoan -> obtainedLoan.returnBooks()}
+                    .thenCompose { sifriTaub.listBookIds(token).thenApply { ids -> assertFalse(ids.isEmpty()) } } }
+            }.join()
+    }
 }
 
 

@@ -65,7 +65,6 @@ class SifriTaub @Inject constructor (tokenFactory: TokenFactory,
 
     private fun waitTillBooksAreAvailable(booksIDs : List<String>) : CompletableFuture<Unit> {
          var result = false
-         println("WAITING")
          while (!result){
              result = true
              booksIDs.fold(CompletableFuture.completedFuture(Unit)){prev, id ->
@@ -386,17 +385,13 @@ class SifriTaub @Inject constructor (tokenFactory: TokenFactory,
                 removeCanceledLoans()
                 // busy wait until request is at the head of the queue
                 while (loanId != loansQueue.peek()) {}
-//                    loansDB.read(loanId).thenCompose {
-//                        l ->
-//                        val loan = LoanRequestInformation.fromJSON(String(l!!))
                 loan.loanStatus = LoanStatus.OBTAINED
                 waitTillBooksAreAvailable(loan.requestedBooks)
                     .thenCompose {
                         loan.requestedBooks.fold(CompletableFuture.completedFuture(Unit)) {
                                 prev, bookId ->
                             prev.thenCompose { decreaseBookCopies(bookId)
-                                //TODO: fix this MOCK
-//                                .thenCompose { loanService.loanBook(bookId)  }
+                                .thenCompose { loanService.loanBook(bookId)  }
                             } }
                             .thenCompose {
                                 loansDB.write(loanId, loan.toByteArray())

@@ -29,7 +29,9 @@ class Loan (private val loanId: String, private val loansDB: DataBase, private v
             val loan = LoanRequestInformation.fromJSON(String(l!!))
             loan.loanStatus = LoanStatus.RETURNED
             loan.requestedBooks.fold(CompletableFuture.completedFuture(Unit)) { prev, bookID ->
-                prev.thenCompose { increaseBookCopies(bookID).thenCompose { loanService.returnBook(bookID) } } }.thenCompose {
+                prev.thenCompose { increaseBookCopies(bookID)
+                    .thenCompose { loanService.returnBook(bookID) }
+                } }.thenCompose {
                 loansDB.write(this.loanId, loan.toByteArray())
             }
         }
