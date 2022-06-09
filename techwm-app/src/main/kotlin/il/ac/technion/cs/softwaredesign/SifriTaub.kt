@@ -9,10 +9,16 @@ import java.time.LocalDateTime
 import java.util.concurrent.CompletableFuture
 import java.util.Queue
 import java.util.LinkedList
-import kotlin.reflect.jvm.internal.impl.types.AbstractTypeCheckerContext
 
 /**
  * This is the main class implementing SifriTaub, the new book borrowing system.
+ *
+ * users database stores mappings of username -> User object
+ * books database stores mappings of id -> Book object
+ * auth database stores mappings of username -> password
+ * ids database stores mappings of username -> User object
+ * loans database stores mappings of loanId -> LoanRequestInformation object
+ * loansQueue is the queue used to store loan requests, and should be updated accordingly.
  *
  * Currently specified:
  * + Managing users
@@ -30,15 +36,71 @@ class SifriTaub @Inject constructor (tokenFactory: TokenFactory,
     private val tokensManager = TokensManager(tokenFactory, dbFactory, "tokens")
     private val idsManager = IDsManager(DataBase(dbFactory, "ids"))
     private val loansDB = DataBase(dbFactory, "loans")
+    private val loansQueue: Queue<String> = LinkedList(listOf())
 
-    private fun authenticateLoan(token: String, loanId: String) : LoanRequestInformation {
-        val username = tokensManager.getUsernameFromToken(token) ?: throw PermissionException()
-        val loan = loansDB.read(loanId)?.let { LoanRequestInformation.fromJSON(String(it)) } ?: throw IllegalArgumentException("No such Loan ID!")
-        if (loan.ownerUserId != username) {
-            throw IllegalArgumentException("This loan does not belong to the requesting user!")
+    /**
+     * responsible for the authentication of a loan request.
+     *
+     * @param token token of user who's performing the request.
+     * @param loanId ID of loan request.
+     * @throws PermissionException if username is null
+     * @throws IllegalArgumentException if loanId does not exist in the loans DB, or the user,is not the one who requested the loan.
+     * @return CompletableFuture<LoanRequestInformation> for the given loan ID.
+     */
+    private fun authenticateLoan(token: String, loanId: String) : CompletableFuture<LoanRequestInformation> {
+        return tokensManager.getUsernameFromToken(token).thenCompose {
+            username->
+            if (username == null) throw PermissionException()
+            loansDB.read(loanId).thenApply {
+                loan ->
+                if (loan == null) { throw IllegalArgumentException("No such Loan ID!") }
+                val returnedLoan = LoanRequestInformation.fromJSON(String(loan))
+                if (returnedLoan.ownerUserId != username) {
+                    throw IllegalArgumentException("This loan does not belong to the requesting user!")
+                }
+                return@thenApply returnedLoan
+            }
         }
-        return loan
     }
+
+    private fun waitTillBooksAreAvailable(booksIDs : List<String>) : CompletableFuture<Unit> {
+         var result = false
+         println("WAITING")
+         while (!result){
+             result = true
+             booksIDs.fold(CompletableFuture.completedFuture(Unit)){prev, id ->
+                 prev.thenCompose { booksDB.read(id).thenApply {
+                         book -> if (Book.fromJSON(String(book!!)).copiesAmount == 0) { result = false}
+                 } }
+            }
+         }
+        return CompletableFuture.completedFuture(Unit)
+    }
+
+
+    private fun decreaseBookCopies(bookId : String) : CompletableFuture<Unit> {
+        return booksDB.read(bookId)
+            .thenCompose {
+                    b ->
+                val book =  Book.fromJSON(String(b!!))
+                book.copiesAmount--
+                booksDB.write(bookId, book.toByteArray())
+            }
+    }
+
+    private fun removeCanceledLoans() : CompletableFuture<Unit> {
+    var isFinished = loansQueue.isEmpty()
+    while (!isFinished){
+        loansDB.read(loansQueue.peek()).thenApply {
+                l -> if (LoanRequestInformation.fromJSON(String(l!!)).loanStatus==LoanStatus.CANCELED)
+                        { loansQueue.remove() }
+                    else
+                        { isFinished = true }
+        }
+    }
+    return CompletableFuture.completedFuture(Unit)
+}
+
 
 
     /**
@@ -56,12 +118,16 @@ class SifriTaub @Inject constructor (tokenFactory: TokenFactory,
      */
 
     fun authenticate(username: String, password: String): CompletableFuture<String> {
-        val pass = authDB.read(username) ?: throw IllegalArgumentException("No such user exists")
-        if (password != String(pass)) {
-            throw IllegalArgumentException("Wrong Password!")
-        }
-        tokensManager.invalidateToken(username)
-        return CompletableFuture.completedFuture(tokensManager.createToken(username))
+        return authDB.read(username).thenApply {
+            pass ->
+            if (pass == null) {
+                throw IllegalArgumentException("No such user exists")
+            }
+            if (password != String(pass)) {
+                throw IllegalArgumentException("Wrong Password!")
+            }
+            tokensManager.invalidateToken(username)
+        }.thenCompose { tokensManager.createToken(username) }
     }
 
     /**
@@ -81,13 +147,15 @@ class SifriTaub @Inject constructor (tokenFactory: TokenFactory,
         if (age < 0) {
             throw IllegalArgumentException("Negative age is illegal")
         }
-        val user = usersDB.read(username)
-        if (user != null) {
-            throw IllegalArgumentException("User already exists")
+        return usersDB.read(username).thenCompose {
+                user ->
+                if (user != null){
+                    throw IllegalArgumentException("User already exists")
+                 }
+                usersDB.write(username, User(username, isFromCS, age).toByteArray()).thenCompose {
+                    authDB.write(username, password.encodeToByteArray())
+                }
         }
-        usersDB.write(username, User(username, isFromCS, age).toByteArray())
-        authDB.write(username, password.encodeToByteArray())
-        return CompletableFuture.supplyAsync{ }
     }
 
     /**
@@ -104,11 +172,15 @@ class SifriTaub @Inject constructor (tokenFactory: TokenFactory,
      * return `null`, indicating that there is no such user
      */
     fun userInformation(token: String, username: String): CompletableFuture<User?> {
-        if (!tokensManager.isValidToken(token)) {
-            throw PermissionException()
+        return tokensManager.isValidToken(token).thenApply {
+            isValid ->
+            if (!isValid) throw PermissionException()
+        }.thenCompose {
+            return@thenCompose usersDB.read(username).thenApply { userInfo ->
+                if (userInfo == null) return@thenApply null
+                else return@thenApply User.fromJSON(String(userInfo))
+            }
         }
-        val userInfo = usersDB.read(username) ?: return CompletableFuture.completedFuture(null)
-        return CompletableFuture.completedFuture( User.fromJSON(String(userInfo)) )
     }
 
 
@@ -126,16 +198,20 @@ class SifriTaub @Inject constructor (tokenFactory: TokenFactory,
      * @throws IllegalArgumentException If a book with the same [id] already exists.
      */
     fun addBookToCatalog(token: String, id: String, description: String, copiesAmount: Int): CompletableFuture<Unit> {
-        if (!tokensManager.isValidToken(token)) {
-            throw PermissionException()
+        return tokensManager.isValidToken(token).thenApply {
+                isValid ->
+            if (!isValid) throw PermissionException()
+        }.thenCompose {
+            booksDB.read(id).thenCompose {
+                    book  ->
+                if (book != null) {
+                    throw IllegalArgumentException("Book already exists")
+                }
+                idsManager.addId(id).thenCompose {
+                    booksDB.write(id, Book(id, description, copiesAmount, LocalDateTime.now()).toByteArray())
+                }
+            }
         }
-        val book: ByteArray? = booksDB.read(id)
-        if (book != null) {
-            throw IllegalArgumentException("Book already exists")
-        }
-        idsManager.addId(id)
-        booksDB.write(id, Book(id, description, copiesAmount, LocalDateTime.now()).toByteArray())
-        return CompletableFuture.supplyAsync { }
     }
 
 
@@ -151,11 +227,16 @@ class SifriTaub @Inject constructor (tokenFactory: TokenFactory,
      * @return A description string of the book with [id]
      */
     fun getBookDescription(token: String, id: String): CompletableFuture<String> {
-        if (!tokensManager.isValidToken(token)) {
-            throw PermissionException()
+        return tokensManager.isValidToken(token).thenApply {
+                isValid ->
+            if (!isValid) throw PermissionException()
+        }.thenCompose {
+            booksDB.read(id).thenApply {
+                    book ->
+                    if (book == null) throw IllegalArgumentException("No such book")
+                    return@thenApply Book.fromJSON(String(book)).description
+            }
         }
-        val book = booksDB.read(id) ?: throw IllegalArgumentException("No such book")
-        return CompletableFuture.completedFuture(Book.fromJSON(String(book)).description)
     }
 
     /**
@@ -170,20 +251,30 @@ class SifriTaub @Inject constructor (tokenFactory: TokenFactory,
      * If there are less than [n] ids of books, this method returns a list of all book ids (sorted as defined above).
      */
     fun listBookIds(token: String, n: Int = 10): CompletableFuture<List<String>> {
-        if (!tokensManager.isValidToken(token)) {
-            throw PermissionException()
+        val booksList = mutableListOf<Book>()
+        return tokensManager.isValidToken(token).thenApply {
+                isValid ->
+            if (!isValid) throw PermissionException()
+        }.thenCompose {
+            idsManager.getIds().thenCompose {
+                ids ->
+                ids.fold(CompletableFuture.completedFuture(Unit)){
+                        prev, id ->
+                    prev.thenCompose { booksDB.read(id)
+                        .thenCompose { book ->
+                            booksList.add(Book.fromJSON(String(book!!)))
+                            CompletableFuture.completedFuture(Unit)
+                        } }
+                }.thenApply {
+                    booksList.asSequence()
+                        .filter { it.copiesAmount > 0}
+                        .sortedBy { it.timeAdded }
+                        .take( n )
+                        .map { it.id }
+                        .toList()
+                }
+            }
         }
-        val ids = idsManager.getIds()
-        // TODO: maybe use allOf
-        return CompletableFuture.completedFuture(
-            ids.asSequence()
-                .map { Book.fromJSON(String(booksDB.read(it)!!)) }
-                .filter { it.copiesAmount > 0}
-                .sortedBy { it.timeAdded }
-                .take( n )
-                .map { it.id }
-                .toList()
-        )
     }
 
     /**
@@ -210,29 +301,31 @@ class SifriTaub @Inject constructor (tokenFactory: TokenFactory,
      * succeed and view this loan request as queued.
      */
     fun submitLoanRequest(token: String, loanName: String, bookIds: List<String>): CompletableFuture<String> {
-        if (!tokensManager.isValidToken(token)) {
-            throw PermissionException()
-        }
-        val unavailableBooks = mutableListOf<String>()
-        for (id in bookIds){
-            val book = booksDB.read(id) ?: throw IllegalArgumentException()
-            if (Book.fromJSON(String(book)).copiesAmount == 0) {
-                unavailableBooks.add(id)
+        return tokensManager.isValidToken(token).thenCompose {
+            isValid ->
+            if (!isValid) throw PermissionException()
+            // check for the books to exist
+            bookIds.fold(CompletableFuture.completedFuture(Unit))
+            { prev, id ->
+                prev.thenCompose {
+                    booksDB.read(id).thenApply {
+                        book ->
+                        if (book == null) { throw IllegalArgumentException() }
+                    }
+                }
+            }.thenCompose {
+                val loanId = iDsFactory.createID()
+                loansQueue.add(loanId)
+                tokensManager.getUsernameFromToken(token).thenCompose { username ->
+                    loansDB.write(
+                        loanId,
+                        LoanRequestInformation(loanName, bookIds, username!!, LoanStatus.QUEUED).toByteArray()
+                    ).thenApply {
+                        return@thenApply loanId
+                    }
+                }
             }
         }
-        val loanId = iDsFactory.createID()
-        lateinit var loan : ByteArray
-        if (unavailableBooks.isEmpty()){
-            bookIds.forEach { loanService.loanBook(it) }
-            loan = LoanRequestInformation(loanName, bookIds, tokensManager.getUsernameFromToken(token)!!, LoanStatus.OBTAINED).toByteArray()
-        }
-        else
-        {
-            loan = LoanRequestInformation(loanName, bookIds, tokensManager.getUsernameFromToken(token)!!, LoanStatus.QUEUED).toByteArray()
-            // TODO: add to queue
-        }
-        loansDB.write(loanId, loan)
-        return CompletableFuture.completedFuture(loanId)
     }
     /**
      * Return information about a specific loan in the system. [id] is the loan id.
@@ -243,10 +336,15 @@ class SifriTaub @Inject constructor (tokenFactory: TokenFactory,
      * @throws IllegalArgumentException If a loan with the supplied [id] does not exist in the system.
      */
     fun loanRequestInformation(token: String, id: String): CompletableFuture<LoanRequestInformation> {
-        if (!tokensManager.isValidToken(token)) {
-            throw PermissionException()
+        return tokensManager.isValidToken(token).thenCompose {
+            isValid ->
+            if (!isValid) throw PermissionException()
+            loansDB.read(id).thenApply {
+                loan ->
+                if (loan == null) throw IllegalArgumentException("No such Loan ID!")
+                return@thenApply LoanRequestInformation.fromJSON(String(loan))
+            }
         }
-        loansDB.read(id)?.let { return CompletableFuture.completedFuture(LoanRequestInformation.fromJSON(String(it))) } ?: throw IllegalArgumentException("No such Loan ID!")
     }
 
     /**
@@ -262,12 +360,12 @@ class SifriTaub @Inject constructor (tokenFactory: TokenFactory,
      * does not exist, or it is not currently in a [LoanStatus.QUEUED] state.
      */
     fun cancelLoanRequest(token: String, loanId: String): CompletableFuture<Unit> {
-        val loan = authenticateLoan(token, loanId)
-        val booksList = loan.requestedBooks
-        booksList.forEach { loanService.returnBook(it) }
-        loan.loanStatus = LoanStatus.CANCELED
-        loansDB.write(loanId, loan.toByteArray())
-        return CompletableFuture.supplyAsync { }
+        return authenticateLoan(token, loanId).thenCompose {
+            loan ->
+            if (loan.loanStatus != LoanStatus.QUEUED) {throw IllegalArgumentException("Loan status is not QUEUED!")}
+            loan.loanStatus = LoanStatus.CANCELED
+            loansDB.write(loanId, loan.toByteArray()).thenCompose { removeCanceledLoans() }
+        }
     }
 
     /**
@@ -278,26 +376,35 @@ class SifriTaub @Inject constructor (tokenFactory: TokenFactory,
      * or does not exist.
      */
     fun waitForBooks(token: String, loanId: String): CompletableFuture<ObtainedLoan> {
-        class Loan(private val loanId: String) : ObtainedLoan {
-            override fun returnBooks(): CompletableFuture<Unit> {
-                val loan = LoanRequestInformation.fromJSON(String(loansDB.read(this.loanId)!!))
-                loan.requestedBooks.forEach { loanService.returnBook(it) }
-                loan.loanStatus = LoanStatus.RETURNED
-                loansDB.write(this.loanId, loan.toByteArray())
-                return CompletableFuture.supplyAsync { }
+        return authenticateLoan(token, loanId).thenCompose {
+            loan ->
+
+            if ((loan.loanStatus == LoanStatus.OBTAINED) or (loan.loanStatus == LoanStatus.CANCELED)){
+                CompletableFuture.completedFuture(Loan(loanId, loansDB, loanService, booksDB, loan.loanStatus == LoanStatus.CANCELED))
             }
-        }
-        val loan = authenticateLoan(token, loanId)
-        if ((loan.loanStatus == LoanStatus.OBTAINED) or (loan.loanStatus == LoanStatus.CANCELED)){
-            return CompletableFuture.completedFuture(Loan(loanId))
-        }
-        else {
-            return CompletableFuture.supplyAsync {
-                // check if the loanId is at the top of the queue by polling
-                // when it is at the top of the queue:
-                // foreach book at the list, try to loan it by loanBook(id).get()
-                // when all books were loaned, change status to obtained and write to DB
-                Loan(loanId)
+            else {
+                removeCanceledLoans()
+                // busy wait until request is at the head of the queue
+                while (loanId != loansQueue.peek()) {}
+//                    loansDB.read(loanId).thenCompose {
+//                        l ->
+//                        val loan = LoanRequestInformation.fromJSON(String(l!!))
+                loan.loanStatus = LoanStatus.OBTAINED
+                waitTillBooksAreAvailable(loan.requestedBooks)
+                    .thenCompose {
+                        loan.requestedBooks.fold(CompletableFuture.completedFuture(Unit)) {
+                                prev, bookId ->
+                            prev.thenCompose { decreaseBookCopies(bookId)
+                                //TODO: fix this MOCK
+//                                .thenCompose { loanService.loanBook(bookId)  }
+                            } }
+                            .thenCompose {
+                                loansDB.write(loanId, loan.toByteArray())
+                            }
+                    }
+                    .thenApply { loansQueue.remove()
+                                return@thenApply Loan(loanId, loansDB, loanService, booksDB, false) }
+//                    }
             }
         }
     }

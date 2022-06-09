@@ -5,7 +5,7 @@ import java.awt.Desktop
 
 plugins {
   kotlin("jvm") version "1.4.30"
-  id("org.jetbrains.dokka") version "1.4.30"
+  id("org.jetbrains.dokka") version "1.6.21"
   `maven-publish`
 }
 
@@ -39,7 +39,7 @@ subprojects {
     implementation(kotlin("stdlib-jdk8"))
     implementation(kotlin("reflect"))
     implementation("com.github.Dor-B:sd-loan-service:1.0.3")
-
+    dokkaHtmlPlugin("org.jetbrains.dokka:kotlin-as-java-plugin:1.6.21")
     testImplementation("org.junit.jupiter", "junit-jupiter-engine", junitVersion)
   }
 

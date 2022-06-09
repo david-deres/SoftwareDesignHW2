@@ -1,25 +1,26 @@
 package il.ac.technion.cs.softwaredesign
 
-import com.google.inject.Guice
+
+import com.google.inject.Singleton
 import dev.misfitlabs.kotlinguice4.KotlinModule
-import dev.misfitlabs.kotlinguice4.getInstance
 import il.ac.technion.cs.softwaredesign.loan.LoanService
 import il.ac.technion.cs.softwaredesign.loan.impl.LoanServiceImpl
 import il.ac.technion.cs.softwaredesign.storage.SecureStorageFactory
-import il.ac.technion.cs.softwaredesign.storage.SecureStorageModule
+import il.ac.technion.cs.softwaredesign.storage.impl.SecureStorageFactoryImpl
 
 
 class SifriTaubModule: KotlinModule() {
 
     override fun configure() {
-        val injector = Guice.createInjector(SecureStorageModule())
-        val storageFactoryInstance = injector.getInstance<SecureStorageFactory>()
+//        val injector = Guice.createInjector(SecureStorageModule())
+//        val storageFactoryInstance = injector.getInstance<SecureStorageFactory>()
 
 
-        bind<TokenFactory>().to<ProductionTokenFactory>()
-        bind<SecureStorageFactory>().toInstance(storageFactoryInstance)
-        bind<LoanService>().to<LoanServiceImpl>()
-        bind<IDsFactory>().to<ProductionIDsFactory>()
+        bind<TokenFactory>().to<ProductionTokenFactory>().`in`<Singleton>()
+        //TODO: install these modules and assure they are treated as singletons
+        bind<SecureStorageFactory>().to<SecureStorageFactoryImpl>().`in`<Singleton>()
+        bind<LoanService>().to<LoanServiceImpl>().`in`<Singleton>()
+        bind<IDsFactory>().to<ProductionIDsFactory>().`in`<Singleton>()
 
     }
 }
