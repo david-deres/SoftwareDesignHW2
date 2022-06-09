@@ -1,6 +1,3 @@
-package il.ac.technion.cs.softwaredesign
-
-import DataBase
 import com.google.inject.Guice
 import dev.misfitlabs.kotlinguice4.getInstance
 import il.ac.technion.cs.softwaredesign.storage.SecureStorageFactory
@@ -24,7 +21,7 @@ class DataBaseTest {
 
     @Test
     fun `read a non existent key returns null`() {
-        Assertions.assertNull(db.read("Hamlet"))
+        Assertions.assertNull(db.read("Hamlet").get())
     }
 
     @Test
@@ -32,32 +29,32 @@ class DataBaseTest {
         val value = "World"
 
         assertDoesNotThrow {
-            db.write(key, value.toByteArray())
+            db.write(key, value.toByteArray()).join()
         }
     }
 
     @Test
     fun `read from an existing key returns correct value`() {
-        Assertions.assertEquals("World", db.read(key)?.let { String(it) })
+        db.read(key).thenApply { Assertions.assertEquals("World", String(it!!)) }.join()
     }
 
     @Test
     fun `write to an existing key overwrites the previous value`() {
         val value = "Again"
-        db.write(key, value.toByteArray())
-        Assertions.assertEquals("Again", db.read(key)?.let { String(it) })
+        db.write(key, value.toByteArray()).join()
+        db.read(key).thenApply { Assertions.assertEquals("Again", String(it!!)) }.join()
     }
 
     @Test
     fun `new name for database returns empty database`() {
         val newDB = DataBase(manager, "new")
-        Assertions.assertNull(newDB.read(key))
+        Assertions.assertNull(newDB.read(key).get())
     }
 
     @Test
     fun `new DataBase instance with same name for database returns existing database`() {
         val newDB = DataBase(manager, "myDB")
-        Assertions.assertEquals("Again", newDB.read(key)?.let { String(it) })
+        newDB.read(key).thenApply { Assertions.assertEquals("Again", String(it!!)) }.join()
     }
 
 
@@ -66,8 +63,8 @@ class DataBaseTest {
         val k = "long-string"
         val value = "Hello".repeat(100).toByteArray()
 
-        db.write(k, value)
-        Assertions.assertEquals("Hello".repeat(100), db.read(k)?.let { String(it) })
+        db.write(k, value).join()
+        db.read(k).thenApply { Assertions.assertEquals("Hello".repeat(100), String(it!!)) }.join()
     }
 }
 

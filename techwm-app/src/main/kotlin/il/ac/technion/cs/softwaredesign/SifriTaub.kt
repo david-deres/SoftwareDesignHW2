@@ -3,6 +3,7 @@ package il.ac.technion.cs.softwaredesign
 import DataBase
 import com.google.inject.Inject
 import com.google.inject.Provider
+import com.google.inject.Singleton
 import il.ac.technion.cs.softwaredesign.loan.LoanService
 import il.ac.technion.cs.softwaredesign.storage.SecureStorageFactory
 import java.time.LocalDateTime
@@ -25,6 +26,7 @@ import java.util.LinkedList
  * + Managing Books
  * + Queueing book loans
  */
+@Singleton
 class SifriTaub @Inject constructor (tokenFactory: TokenFactory,
                                      dataBaseProvider: Provider<SecureStorageFactory>, private val loanService: LoanService,
                                      private val iDsFactory: IDsFactory) {
@@ -378,7 +380,7 @@ class SifriTaub @Inject constructor (tokenFactory: TokenFactory,
         return authenticateLoan(token, loanId).thenCompose {
             loan ->
 
-            if ((loan.loanStatus == LoanStatus.OBTAINED) or (loan.loanStatus == LoanStatus.CANCELED)){
+            if ((loan.loanStatus == LoanStatus.OBTAINED) || (loan.loanStatus == LoanStatus.CANCELED)){
                 CompletableFuture.completedFuture(Loan(loanId, loansDB, loanService, booksDB, loan.loanStatus == LoanStatus.CANCELED))
             }
             else {

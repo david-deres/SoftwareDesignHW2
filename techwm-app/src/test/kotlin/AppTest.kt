@@ -400,6 +400,52 @@ class AppTest {
         assertThat(throwable.cause!!, isA<IllegalArgumentException>())
     }
 
+    @Test
+    fun `cancelLoanRequest throws an exception on request from another user`(){
+        val (username, password) = registerFirstUser().join()
+
+        val throwable = assertThrows<CompletionException> {
+            sifriTaub.register("u", "p", true, 25)
+                .thenCompose {
+                sifriTaub.authenticate("u", "p")
+                    .thenCompose { token ->
+                    sifriTaub.addBookToCatalog(token, "1", "harry-potter", 1)
+                        .thenCompose { sifriTaub.submitLoanRequest(token, "first", listOf("1")) }}}
+                        .thenCompose { loanID ->
+                            sifriTaub.authenticate(username, password)
+                                .thenCompose { newToken -> sifriTaub.cancelLoanRequest(newToken, loanID) }
+                         }.join()
+        }
+        assertThat(throwable.cause!!, isA<IllegalArgumentException>())
+    }
+
+    @Test
+    fun `cancelLoanRequest throws an exception on request with nonexistent loan`(){
+        val (username, password) = registerFirstUser().join()
+
+        val throwable = assertThrows<CompletionException> {
+                    sifriTaub.authenticate(username, password)
+                        .thenCompose { newToken -> sifriTaub.cancelLoanRequest(newToken, "loanID") }.join()
+        }
+        assertThat(throwable.cause!!, isA<IllegalArgumentException>())
+    }
+
+    @Test
+    fun `cancelLoanRequest throws an exception on request with obtained loan`(){
+
+        val throwable = assertThrows<CompletionException> {
+            sifriTaub.register("u", "p", true, 25)
+                .thenCompose {
+                    sifriTaub.authenticate("u", "p")
+                        .thenCompose { token ->
+                            sifriTaub.addBookToCatalog(token, "1", "harry-potter", 1)
+                                .thenCompose { sifriTaub.submitLoanRequest(token, "first", listOf("1"))
+                                    .thenCompose { loanID -> sifriTaub.waitForBooks(token, loanID)
+                                        .thenCompose { sifriTaub.cancelLoanRequest(token, loanID) }}}}}.join()
+        }
+        assertThat(throwable.cause!!, isA<IllegalArgumentException>())
+    }
+
 
     @Test
     fun `cancelLoanRequest cancels the loan`(){

@@ -24,9 +24,11 @@ class Loan (private val loanId: String, private val loansDB: DataBase, private v
     }
 
     override fun returnBooks(): CompletableFuture<Unit> {
-        if (isCanceled) return CompletableFuture.completedFuture(Unit)
+        if (isCanceled ) return CompletableFuture.completedFuture(Unit)
         return loansDB.read(this.loanId).thenCompose { l ->
             val loan = LoanRequestInformation.fromJSON(String(l!!))
+            // no double returns on the same Loan
+            if (loan.loanStatus == LoanStatus.RETURNED) { CompletableFuture.completedFuture(Unit) }
             loan.loanStatus = LoanStatus.RETURNED
             loan.requestedBooks.fold(CompletableFuture.completedFuture(Unit)) { prev, bookID ->
                 prev.thenCompose { increaseBookCopies(bookID)
