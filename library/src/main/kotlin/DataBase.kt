@@ -1,4 +1,3 @@
-import com.google.inject.Inject
 import il.ac.technion.cs.softwaredesign.storage.SecureStorageFactory
 import java.util.concurrent.CompletableFuture
 
@@ -9,9 +8,8 @@ import java.util.concurrent.CompletableFuture
  * @param dbFactory the secure storage factory to be used to create instances.
  * @param name the wanted name of the newly created database.
  */
-open class DataBase @Inject constructor(dbFactory: SecureStorageFactory, name:String) {
+open class DataBase (dbFactory: SecureStorageFactory, name:String) {
     private val database = dbFactory.open(name.encodeToByteArray())
-
 
     // Size is in Bytes
     private val maxDBEntrySize = 100
@@ -44,28 +42,6 @@ open class DataBase @Inject constructor(dbFactory: SecureStorageFactory, name:St
 
 
 
-    // TODO: maybe use thenCombine to concat results
-//    fun read (key: String): CompletableFuture<ByteArray?> = CompletableFuture.supplyAsync {
-//        database.thenApply { db ->
-//            db.read(key.plus("_-1").encodeToByteArray()).thenApply { numOfBlocks ->
-//                if (numOfBlocks == null) {
-//                    return@thenApply null
-//                }
-//                else {
-//                    var returnedValue = byteArrayOf()
-//                    val futures = arrayListOf<CompletableFuture<ByteArray?>>()
-//                    for (i in 0..String(numOfBlocks).toInt()){
-//                        futures.add(db.read(key.plus("_${i}").encodeToByteArray()))
-//                    }
-//                    CompletableFuture.allOf()
-//                }
-//            }
-//
-//        }
-//        return@supplyAsync "".encodeToByteArray()
-//    }
-
-
     /**
      * performs the write operation, notice that the partitioning to maxDBEntry sizes is done in the while loop.
      *
@@ -73,7 +49,6 @@ open class DataBase @Inject constructor(dbFactory: SecureStorageFactory, name:St
      * @param value value associated with the key
      * @return comppletablefuture<unit> since nothing has to be returned.
      */
-    // TODO: maybe use thenCompose for sequential writes to DB
     fun write (key: String, value: ByteArray) : CompletableFuture<Unit> = CompletableFuture.supplyAsync {
         database.thenApply { db ->
             val bytesToWrite = value.size

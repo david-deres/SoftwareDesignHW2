@@ -25,7 +25,7 @@ class AppTest {
     }
 
     private fun addBooksToCatalog(amount: Int): CompletableFuture<String> {
-        val username = "user"
+        val username = "user-c"
         val password = "123456"
 
 
@@ -523,7 +523,29 @@ class AppTest {
                     .thenCompose { sifriTaub.listBookIds(token).thenApply { ids -> assertFalse(ids.isEmpty()) } } }
             }.join()
     }
+
+//    @Test
+//    fun `loan is blocking until all books are available`(){
+//        val (token1, loanId1) = sifriTaub.register("username1", "password1", true, 25).thenCompose {
+//            sifriTaub.authenticate("username1", "password1").thenCompose { token ->
+//                (1..7).fold(CompletableFuture.completedFuture(Unit)) {prev, id ->
+//                    prev.thenCompose { sifriTaub.addBookToCatalog(token, id.toString(), "random${id.toString()}", 1) }
+//                }.thenApply { token }
+//            }
+//        }.thenCompose {
+//                token ->  sifriTaub.submitLoanRequest(token, "first", listOf("1", "2")).thenApply { loanID -> token to loanID }}.get()
+//
+//        val (token2, loanId2) = sifriTaub.register("username2", "password2", true, 25).thenCompose {
+//            sifriTaub.authenticate("username2", "password2")
+//                .thenCompose { token -> sifriTaub.submitLoanRequest(token, "second", listOf("1", "2")).thenApply { loanID -> token to loanID }}}.get()
+//
+//        sifriTaub.waitForBooks(token1, loanId1).thenCompose { sifriTaub.waitForBooks(token2, loanId2) }.orTimeout(1, TimeUnit.MILLISECONDS)
+//
+//        sifriTaub.loanRequestInformation(token2, loanId2).thenApply { Assertions.assertEquals(LoanStatus.QUEUED, it.loanStatus) }
+//    }
 }
+
+
 
 
 //
