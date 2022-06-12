@@ -6,14 +6,14 @@ import il.ac.technion.cs.softwaredesign.TokenFactory
 import il.ac.technion.cs.softwaredesign.loan.LoanService
 
 
-class TestSifriTaubModule : KotlinModule() {
+class TestSifriTaubModule(private val loanService: LoanService) : KotlinModule() {
 
 
     override fun configure() {
 
         bind<TokenFactory>().to<ProductionTokenFactory>()
         install(TestSecureStorageModule())
-        bind<LoanService>().to<TestLoanService>()
+        bind<LoanService>().toInstance(loanService)
         bind<IDsFactory>().to<ProductionIDsFactory>()
 
     }

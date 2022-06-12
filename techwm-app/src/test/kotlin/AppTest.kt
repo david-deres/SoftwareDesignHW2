@@ -3,18 +3,20 @@ import com.natpryce.hamkrest.assertion.assertThat
 import com.natpryce.hamkrest.isA
 import dev.misfitlabs.kotlinguice4.getInstance
 import il.ac.technion.cs.softwaredesign.*
+import il.ac.technion.cs.softwaredesign.loan.LoanService
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
+import org.junit.jupiter.api.*
 
-import org.junit.jupiter.api.Assertions
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.assertDoesNotThrow
-import org.junit.jupiter.api.assertThrows
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionException
 
 class AppTest {
-    private val injector = Guice.createInjector(TestSifriTaubModule())
+    private val loanServiceMock = mockk<LoanService>()
+    private val injector = Guice.createInjector(TestSifriTaubModule(loanServiceMock))
     private val sifriTaub = injector.getInstance<SifriTaub>()
 
     private fun registerFirstUser(): CompletableFuture<Pair<String, String>> {
@@ -36,6 +38,11 @@ class AppTest {
                 }.thenApply { token }
             }
         }
+    }
+
+    @BeforeEach fun setupMock() {
+        every {loanServiceMock.loanBook(any())} returns CompletableFuture.completedFuture(Unit)
+        every {loanServiceMock.returnBook(any())} returns CompletableFuture.completedFuture(Unit)
     }
 
     @Test
@@ -78,7 +85,9 @@ class AppTest {
                     .thenCompose { loanId -> // Second scope, to have loanId
                         sifriTaub.waitForBooks(token, loanId).thenCompose {
                             sifriTaub.loanRequestInformation(token, loanId)
-                        }.thenApply { loanInfo -> Assertions.assertEquals(loanInfo.loanStatus, LoanStatus.OBTAINED) }
+                        }.thenApply { loanInfo -> Assertions.assertEquals(loanInfo.loanStatus, LoanStatus.OBTAINED)
+                                        verify (exactly = 1) {loanServiceMock.loanBook("harry-potter")}
+                                        verify (exactly = 1) {loanServiceMock.loanBook("intro-to-cs")}}
                     }
             }.join()
     }
@@ -357,6 +366,7 @@ class AppTest {
                     .thenCompose { sifriTaub.listBookIds(token).thenApply { ids -> assertTrue(ids.isEmpty()) } }
             }
         }.join()
+        verify (exactly = 1) {loanServiceMock.loanBook("1")}
     }
 
     @Test
@@ -444,6 +454,7 @@ class AppTest {
                                         .thenCompose { sifriTaub.cancelLoanRequest(token, loanID) }}}}}.join()
         }
         assertThat(throwable.cause!!, isA<IllegalArgumentException>())
+        verify (exactly = 1) {loanServiceMock.loanBook("1")}
     }
 
 
@@ -477,6 +488,10 @@ class AppTest {
                 .thenCompose { sifriTaub.loanRequestInformation(token, loanId2) }
                 .thenApply { loanInfo -> Assertions.assertEquals(LoanStatus.OBTAINED, loanInfo.loanStatus) }}
         }}.join()
+        verify (exactly = 0) {loanServiceMock.loanBook("1")}
+        verify (exactly = 0) {loanServiceMock.loanBook("2")}
+        verify (exactly = 1) {loanServiceMock.loanBook("3")}
+        verify (exactly = 1) {loanServiceMock.loanBook("4")}
     }
 
     @Test
@@ -507,6 +522,8 @@ class AppTest {
                                 }
                         }
                 }}}.join()
+        verify (exactly = 4) {loanServiceMock.loanBook(any())}
+
     }
 
     @Test
@@ -522,6 +539,9 @@ class AppTest {
                     .thenCompose { obtainedLoan -> obtainedLoan.returnBooks()}
                     .thenCompose { sifriTaub.listBookIds(token).thenApply { ids -> assertFalse(ids.isEmpty()) } } }
             }.join()
+        verify (exactly = 1) {loanServiceMock.loanBook("1")}
+        verify (exactly = 1) {loanServiceMock.returnBook("1")}
+
     }
 
 //    @Test
