@@ -1,4 +1,4 @@
-# SifriTaub • Assignment 3
+# SifriTaub • Assignment 2
 
 ## Authors
 * David Deres
