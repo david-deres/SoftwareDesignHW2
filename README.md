@@ -1,8 +1,8 @@
 # SifriTaub • Assignment 3
 
 ## Authors
-* David Deres, 305312183
-* Adan Abo Hyeah , 206438889
+* David Deres
+* Adan Abo Hyeah
 
 ## Notes
 
